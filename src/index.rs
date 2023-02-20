@@ -43,6 +43,12 @@ impl Display for IndexError {
 
 impl Error for IndexError {}
 
+impl From<ignore::Error> for IndexError {
+	fn from(value: ignore::Error) -> Self {
+		IndexError::Other(value.into())
+	}
+}
+
 impl From<std::io::Error> for IndexError {
 	fn from(value: std::io::Error) -> Self {
 		IndexError::Other(value.into())
@@ -64,7 +70,13 @@ impl Index {
 		// Create a list of files to index
 		let spinner = ProgressBar::new_spinner().with_message("Collecting files...");
 		let mut files = Vec::new();
-		index_dir(Path::new("."), &mut files, &spinner).map_err(IndexError::Other)?;
+		for res in ignore::Walk::new(".") {
+			match res {
+				Ok(entry) => files.push(entry.path().to_path_buf()),
+				Err(e) => return Err(e.into()),
+			}
+		}
+
 		spinner.finish_with_message("Collecting files... Done.");
 
 		// Index all files into documents
