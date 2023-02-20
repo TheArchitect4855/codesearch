@@ -45,7 +45,9 @@ fn main() {
 		.into_iter()
 		.for_each(|(file, rank, previews)| {
 			println!("{} ({})", style(file).bold(), rank);
-			previews.into_iter().for_each(|prev| println!("\t{}", prev));
+			previews
+				.into_iter()
+				.for_each(|(line, prev)| println!("{}\t{prev}", style(line).bold()));
 		});
 }
 
@@ -74,7 +76,7 @@ fn get_trigrams(bytes: &[u8], buf: &mut Vec<[u8; 3]>) {
 fn search(
 	index: &mut Index,
 	terms: Vec<String>,
-) -> Result<Vec<(String, usize, Vec<String>)>, Box<dyn Error>> {
+) -> Result<Vec<(String, usize, Vec<(usize, String)>)>, Box<dyn Error>> {
 	let mut trigrams = Vec::new();
 	terms
 		.iter()
