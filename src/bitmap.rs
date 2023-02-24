@@ -24,15 +24,6 @@ impl BitMap {
 		return &self.0;
 	}
 
-	pub fn get(&self, i: usize) -> Option<bool> {
-		let byte = i / 8;
-		let bit = i % 8;
-
-		let byte = *self.0.get(byte)?;
-		let mask = 1 << bit;
-		Some((byte & mask) > 0)
-	}
-
 	pub fn set(&mut self, i: usize, v: bool) {
 		let byte = i / 8;
 		let bit = i % 8;
@@ -42,16 +33,6 @@ impl BitMap {
 		} else {
 			self.0[byte] &= !mask;
 		}
-	}
-
-	pub fn inverse(&mut self) {
-		for b in self.0.iter_mut() {
-			*b = !*b;
-		}
-	}
-
-	pub fn len(&self) -> usize {
-		self.0.len()
 	}
 }
 

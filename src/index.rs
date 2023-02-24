@@ -1,10 +1,12 @@
 use indicatif::ProgressBar;
 use std::collections::HashMap;
 use std::error::Error;
+use std::ffi::{OsStr, OsString};
 use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::SystemTime;
 
 use crate::bitmap::BitMap;
 use crate::encoding;
@@ -13,6 +15,7 @@ const HEADER_LEN: u64 = 12;
 
 pub struct Index {
 	document_count: u32,
+	modified: SystemTime,
 	ngram_count: u32,
 	source: BufReader<File>,
 }
@@ -68,7 +71,6 @@ impl Index {
 
 	pub fn create<P: AsRef<Path>>(path: P) -> Result<Self, IndexError> {
 		// Create a list of files to index
-		let spinner = ProgressBar::new_spinner().with_message("Collecting files...");
 		let mut files = Vec::new();
 		for res in ignore::Walk::new(".") {
 			match res {
@@ -76,8 +78,6 @@ impl Index {
 				Err(e) => return Err(e.into()),
 			}
 		}
-
-		spinner.finish_with_message("Collecting files... Done.");
 
 		// Index all files into documents
 		let progress = ProgressBar::new(files.len() as u64 * 2);
@@ -98,8 +98,7 @@ impl Index {
 				continue;
 			}
 
-			let name = file.to_string_lossy().to_string();
-			documents.push((name, trigrams));
+			documents.push((file, trigrams));
 		}
 
 		// Order documents by filename
@@ -135,12 +134,21 @@ impl Index {
 			.truncate(true)
 			.open(&path)?;
 
-		write_index(file, documents, index).map_err(IndexError::Other)?;
+		write_index(
+			file,
+			documents
+				.into_iter()
+				.map(|v| v.0.as_os_str().to_os_string())
+				.collect(),
+			index,
+		)
+		.map_err(IndexError::Other)?;
 		Self::load(path)
 	}
 
 	pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, IndexError> {
 		let file = File::open(path)?;
+		let metadata = file.metadata()?;
 		let mut reader = BufReader::new(file);
 		let mut header = [0; 12];
 		reader.read_exact(&mut header)?;
@@ -162,6 +170,7 @@ impl Index {
 
 		Ok(Self {
 			document_count,
+			modified: metadata.modified()?,
 			ngram_count,
 			source: reader,
 		})
@@ -171,44 +180,26 @@ impl Index {
 		todo!()
 	}
 
-	pub fn find_document(
-		&mut self,
-		document: u32,
-	) -> Result<Option<(String, Vec<([u8; 3], u32)>)>, IndexError> {
+	pub fn find_document(&mut self, document: u32) -> Result<Option<OsString>, IndexError> {
 		let seek_start = HEADER_LEN + (self.bitmask_len() + 3) * self.ngram_count as u64;
 		self.source.seek(SeekFrom::Start(seek_start))?;
 		let mut buf = Vec::with_capacity(1024);
 		for _ in 0..document {
-			if self.source.read_until(0x1e, &mut buf)? == 0 {
+			if self.source.read_until(0, &mut buf)? == 0 {
 				return Ok(None);
 			}
 
 			buf.clear();
 		}
 
-		let len = self.source.read_until(0x1f, &mut buf)?;
+		let len = self.source.read_until(0, &mut buf)?;
 		if len == 0 {
 			return Ok(None);
 		}
 
-		buf.pop(); // Remove 0x1f
-		let document = String::from_utf8(buf)?;
-
-		let mut buf = Vec::with_capacity(1024);
-		self.source.read_until(0x1e, &mut buf)?;
 		buf.pop();
-
-		let mut trigrams = Vec::new();
-		let mut trigram = [0; 3];
-		let mut count = [0; 5];
-		for i in (0..buf.len()).step_by(8) {
-			trigram.copy_from_slice(&buf[i..i + 3]);
-			count.copy_from_slice(&buf[i + 3..i + 8]);
-
-			trigrams.push((trigram, encoding::from_ascii_compat(count)));
-		}
-
-		Ok(Some((document, trigrams)))
+		let document = bytes_to_os_string(buf);
+		Ok(Some(document))
 	}
 
 	pub fn find_trigram(&mut self, trigram: [u8; 3]) -> Result<Option<BitMap>, IndexError> {
@@ -286,7 +277,7 @@ fn index_file(path: &Path) -> Result<Vec<([u8; 3], u32)>, IndexError> {
 
 fn write_index<T: Write>(
 	mut out: T,
-	documents: Vec<String>,
+	documents: Vec<OsString>,
 	index: Vec<([u8; 3], BitMap)>,
 ) -> Result<(), Box<dyn Error>> {
 	assert!(documents.len() <= u32::MAX as usize);
@@ -329,12 +320,53 @@ fn write_index<T: Write>(
 
 	// Write documents
 	for doc in documents {
-		out.write_all(doc.as_bytes());
-		out.write_all(&[0x1e]);
+		out.write_all(os_str_to_bytes(&doc))?;
+		out.write_all(&[0])?;
 		progress.inc(1);
 	}
 
 	progress.finish();
 
 	Ok(())
+}
+
+#[cfg(target_family = "windows")]
+fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
+	use std::os::windows::ffi::OsStrExt;
+	let mut res = Vec::with_capacity(s.len());
+	s.encode_wide().for_each(|v| {
+		let bytes = v.to_be_bytes();
+		res.extend_from_slice(&bytes);
+	});
+
+	res
+}
+
+#[cfg(target_family = "unix")]
+fn os_str_to_bytes(s: &OsStr) -> &[u8] {
+	use std::os::unix::ffi::OsStrExt;
+	s.as_bytes()
+}
+
+#[cfg(target_family = "windows")]
+fn bytes_to_os_string(b: Vec<u8>) -> OsString {
+	use std::os::windows::ffi::OsStringExt;
+	if b.len() % 2 != 0 {
+		panic!("invalid number of bytes for a UTF-16 string");
+	}
+
+	let wide = Vec::with_capacity(b.len() / 2);
+	let mut buf = [0; 2];
+	for i in (0..b.len()).step(2) {
+		buf.copy_from_slice(&b[i..i + 2]);
+		wide.push(u16::from_be_bytes(buf));
+	}
+
+	OsString::from_wide(wide)
+}
+
+#[cfg(target_family = "unix")]
+fn bytes_to_os_string(b: Vec<u8>) -> OsString {
+	use std::os::unix::ffi::OsStringExt;
+	OsString::from_vec(b)
 }

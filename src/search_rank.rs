@@ -30,7 +30,7 @@ pub fn rank_file<P: AsRef<Path> + std::fmt::Debug>(
 
 	// Check for individual terms
 	search_terms.iter().for_each(|term| {
-		if let Some(i) = contents.find(term) {
+		if contents.contains(term) {
 			rank += term.len() * 10;
 			preview_buf.push(get_preview(&contents, term));
 		}
@@ -41,7 +41,7 @@ pub fn rank_file<P: AsRef<Path> + std::fmt::Debug>(
 		.iter()
 		.map(|tri| std::str::from_utf8(tri).unwrap())
 		.for_each(|tri| {
-			if let Some(i) = contents.find(tri) {
+			if contents.contains(tri) {
 				rank += 1;
 				preview_buf.push(get_preview(&contents, tri));
 			}

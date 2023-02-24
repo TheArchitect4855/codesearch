@@ -4,6 +4,7 @@ use console::style;
 use search_rank::rank_file;
 use std::env;
 use std::error::Error;
+use std::ffi::OsString;
 use std::process;
 
 mod bitmap;
@@ -19,17 +20,19 @@ fn main() {
 		show_help(name.as_deref());
 	}
 
-	let mut index = match Index::load("index.dat") {
-		Ok(v) => v,
+	let mut index = match Index::load("index.dat")
+		.and_then(|mut i| {
+			i.update()?;
+			Ok(i)
+		})
+		.or_else(|e| {
+			eprintln!("Failed to read index: {e}");
+			Index::create("index.dat")
+		}) {
+		Ok(i) => i,
 		Err(e) => {
-			println!("Failed to open index: {e}");
-			match Index::create("index.dat") {
-				Ok(v) => v,
-				Err(e) => {
-					eprintln!("Failed to create index ({e})");
-					return;
-				}
-			}
+			eprintln!("Index creation failed: {e}");
+			process::exit(1);
 		}
 	};
 
@@ -37,14 +40,14 @@ fn main() {
 		Ok(v) => v,
 		Err(e) => {
 			eprintln!("Search failed: {e}");
-			return;
+			process::exit(1);
 		}
 	};
 
 	results[..usize::min(5, results.len())]
 		.into_iter()
 		.for_each(|(file, rank, previews)| {
-			println!("{} ({})", style(file).bold(), rank);
+			println!("{} ({})", style(file.to_string_lossy()).bold(), rank);
 			previews
 				.into_iter()
 				.for_each(|(line, prev)| println!("{}\t{prev}", style(line).bold()));
@@ -76,7 +79,7 @@ fn get_trigrams(bytes: &[u8], buf: &mut Vec<[u8; 3]>) {
 fn search(
 	index: &mut Index,
 	terms: Vec<String>,
-) -> Result<Vec<(String, usize, Vec<(usize, String)>)>, Box<dyn Error>> {
+) -> Result<Vec<(OsString, usize, Vec<(usize, String)>)>, Box<dyn Error>> {
 	let mut trigrams = Vec::new();
 	terms
 		.iter()
@@ -95,7 +98,7 @@ fn search(
 			continue;
 		}
 
-		let (doc, _) = index
+		let doc = index
 			.find_document(doc as u32)?
 			.expect("find_trigram return invalid document index");
 
