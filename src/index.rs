@@ -247,26 +247,6 @@ impl Index {
 	}
 }
 
-fn index_dir(
-	path: &Path,
-	files: &mut Vec<PathBuf>,
-	spinner: &ProgressBar,
-) -> Result<(), Box<dyn Error>> {
-	spinner.tick();
-	let dir = path.read_dir()?;
-	for entry in dir {
-		let entry = entry?;
-		let file_type = entry.file_type()?;
-		if file_type.is_dir() {
-			index_dir(&entry.path(), files, spinner)?;
-		} else {
-			files.push(entry.path());
-		}
-	}
-
-	Ok(())
-}
-
 fn index_file(path: &Path) -> Result<Vec<([u8; 3], u32)>, IndexError> {
 	let file = File::open(path)?;
 	let mut reader = BufReader::new(file);
@@ -306,10 +286,9 @@ fn index_file(path: &Path) -> Result<Vec<([u8; 3], u32)>, IndexError> {
 
 fn write_index<T: Write>(
 	mut out: T,
-	documents: Vec<(String, Vec<([u8; 3], u32)>)>,
+	documents: Vec<String>,
 	index: Vec<([u8; 3], BitMap)>,
 ) -> Result<(), Box<dyn Error>> {
-	// Write header
 	assert!(documents.len() <= u32::MAX as usize);
 	let document_count = (documents.len() as u32).to_be_bytes();
 
@@ -348,18 +327,10 @@ fn write_index<T: Write>(
 		progress.inc(1);
 	}
 
-	progress.finish();
-
 	// Write documents
-	for (document, trigrams) in documents {
-		out.write_all(document.as_bytes())?;
-		out.write_all(&[0x1f])?;
-		for (trigram, count) in trigrams {
-			out.write_all(&trigram)?;
-			out.write_all(&encoding::to_ascii_compat(count))?;
-		}
-
-		out.write_all(&[0x1e])?;
+	for doc in documents {
+		out.write_all(doc.as_bytes());
+		out.write_all(&[0x1e]);
 		progress.inc(1);
 	}
 
