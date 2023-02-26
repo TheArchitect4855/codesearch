@@ -24,6 +24,13 @@ impl BitMap {
 		return &self.0;
 	}
 
+	pub fn get(&self, i: usize) -> bool {
+		let byte = i / 8;
+		let bit = i % 8;
+		let mask = (1 << bit) as u8;
+		self.0[byte] & mask != 0
+	}
+
 	pub fn set(&mut self, i: usize, v: bool) {
 		let byte = i / 8;
 		let bit = i % 8;

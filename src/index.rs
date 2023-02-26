@@ -5,7 +5,7 @@ use std::ffi::{OsStr, OsString};
 use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::bitmap::BitMap;
@@ -101,22 +101,15 @@ impl Index {
 			documents.push((file, trigrams));
 		}
 
-		// Order documents by filename
-		documents.sort_by(|a, b| a.0.cmp(&b.0));
-
 		// Put all documents into a search index
 		let mut index = HashMap::new();
-		for (i, trigrams) in documents
-			.iter()
-			.map(|v| v.1.iter().map(|v| v.0))
-			.enumerate()
-		{
+		for (i, trigrams) in documents.iter().map(|v| &v.1).enumerate() {
 			for t in trigrams {
-				if !index.contains_key(&t) {
-					index.insert(t, BitMap::new(documents.len()));
+				if !index.contains_key(t) {
+					index.insert(*t, BitMap::new(documents.len()));
 				}
 
-				index.get_mut(&t).unwrap().set(i, true);
+				index.get_mut(t).unwrap().set(i, true);
 			}
 
 			progress.inc(1);
@@ -177,7 +170,110 @@ impl Index {
 	}
 
 	pub fn update(&mut self) -> Result<(), IndexError> {
-		todo!()
+		// Get list of files
+		let mut files = Vec::with_capacity(self.document_count as usize);
+		let mut needs_reindex = false;
+		for res in ignore::Walk::new(".") {
+			let entry = res?;
+			let path = entry.path().to_path_buf();
+			let modified = entry.metadata()?.modified()?;
+			if modified > self.modified {
+				needs_reindex = true;
+			}
+
+			files.push((path, modified));
+		}
+
+		if !needs_reindex {
+			return Ok(());
+		}
+
+		// Load index into memory
+		let seek_start = HEADER_LEN;
+		self.source.seek(SeekFrom::Start(seek_start))?;
+
+		let bitmap_len = (self.document_count as f64 / 8.0).ceil() as u64;
+		let mut index = Vec::with_capacity(self.ngram_count as usize);
+		let mut trigram_buf = [0; 3];
+		let mut bitmap_buf = vec![0; bitmap_len as usize];
+		for _ in 0..self.ngram_count {
+			self.source.read_exact(&mut trigram_buf)?;
+			self.source.read_exact(&mut bitmap_buf)?;
+
+			let bitmap = BitMap::from(bitmap_buf.clone());
+			index.push((trigram_buf, bitmap));
+		}
+
+		let mut documents = HashMap::with_capacity(self.document_count as usize);
+		let mut buf = Vec::with_capacity(1024);
+		for i in 0..self.document_count as usize {
+			buf.clear();
+			self.source.read_until(0, &mut buf)?;
+			buf.pop();
+
+			let doc = PathBuf::from(bytes_to_os_string(buf.clone()));
+			if !files.iter().any(|(path, _)| path == &doc) {
+				// Filter out files if they no longer exist on disk
+				continue;
+			}
+
+			let trigrams = index
+				.iter()
+				.filter_map(|(tri, bit)| if bit.get(i) { Some(*tri) } else { None })
+				.collect::<Vec<[u8; 3]>>();
+
+			if trigrams.len() == 0 {
+				documents.remove(&doc);
+				continue;
+			}
+
+			documents.insert(doc, trigrams);
+		}
+
+		// Reindex updated files
+		let files = files.into_iter().filter_map(|(path, modified)| {
+			if modified > self.modified {
+				Some(path)
+			} else {
+				None
+			}
+		});
+
+		for file in files {
+			let trigrams = match index_file(&file) {
+				Ok(v) => v,
+				Err(e) => {
+					eprintln!("Failed to index file {}: {}", file.to_string_lossy(), e);
+					continue;
+				}
+			};
+
+			documents.insert(file, trigrams);
+		}
+
+		let mut index = HashMap::new();
+		for (i, tris) in documents.iter().map(|(_, trigrams)| trigrams).enumerate() {
+			tris.iter().for_each(|tri| {
+				if !index.contains_key(tri) {
+					index.insert(*tri, BitMap::new(documents.len()));
+				}
+
+				index.get_mut(tri).unwrap().set(i, true);
+			})
+		}
+
+		let mut index = index.into_iter().collect::<Vec<([u8; 3], BitMap)>>();
+		index.sort_by(|a, b| a.0.cmp(&b.0));
+
+		let documents = documents
+			.into_iter()
+			.map(|(file, _)| file.into_os_string())
+			.collect();
+
+		let out = self.source.get_mut();
+		out.seek(SeekFrom::Start(0))?;
+		write_index(out, documents, index).map_err(IndexError::Other)?;
+		Ok(())
 	}
 
 	pub fn find_document(&mut self, document: u32) -> Result<Option<OsString>, IndexError> {
@@ -238,11 +334,11 @@ impl Index {
 	}
 }
 
-fn index_file(path: &Path) -> Result<Vec<([u8; 3], u32)>, IndexError> {
+fn index_file(path: &Path) -> Result<Vec<[u8; 3]>, IndexError> {
 	let file = File::open(path)?;
 	let mut reader = BufReader::new(file);
 	let mut buf = [0; 3];
-	let mut trigrams = HashMap::new();
+	let mut trigrams = Vec::new();
 	'read: while let Ok(()) = reader.read_exact(&mut buf) {
 		reader.seek_relative(-2)?;
 
@@ -262,16 +358,13 @@ fn index_file(path: &Path) -> Result<Vec<([u8; 3], u32)>, IndexError> {
 				}
 			}
 
-			let add = !trigrams.contains_key(&lower);
+			let add = !trigrams.contains(&lower);
 			if add {
-				trigrams.insert(lower, 1);
-			} else {
-				*trigrams.get_mut(&lower).unwrap() += 1;
+				trigrams.push(lower);
 			}
 		}
 	}
 
-	let trigrams = trigrams.into_iter().collect();
 	Ok(trigrams)
 }
 
@@ -330,6 +423,12 @@ fn write_index<T: Write>(
 	Ok(())
 }
 
+#[cfg(target_family = "unix")]
+fn os_str_to_bytes(s: &OsStr) -> &[u8] {
+	use std::os::unix::ffi::OsStrExt;
+	s.as_bytes()
+}
+
 #[cfg(target_family = "windows")]
 fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
 	use std::os::windows::ffi::OsStrExt;
@@ -343,9 +442,9 @@ fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
 }
 
 #[cfg(target_family = "unix")]
-fn os_str_to_bytes(s: &OsStr) -> &[u8] {
-	use std::os::unix::ffi::OsStrExt;
-	s.as_bytes()
+fn bytes_to_os_string(b: Vec<u8>) -> OsString {
+	use std::os::unix::ffi::OsStringExt;
+	OsString::from_vec(b)
 }
 
 #[cfg(target_family = "windows")]
@@ -365,8 +464,4 @@ fn bytes_to_os_string(b: Vec<u8>) -> OsString {
 	OsString::from_wide(wide)
 }
 
-#[cfg(target_family = "unix")]
-fn bytes_to_os_string(b: Vec<u8>) -> OsString {
-	use std::os::unix::ffi::OsStringExt;
-	OsString::from_vec(b)
-}
+// This is a change! HELLO WORLD
