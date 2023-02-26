@@ -6,7 +6,7 @@ pub fn rank_file<P: AsRef<Path> + std::fmt::Debug>(
 	trigrams: &[[u8; 3]],
 	previews: &mut Vec<(usize, String)>,
 ) -> std::io::Result<usize> {
-	let contents = fs::read_to_string(&path)?;
+	let contents = fs::read_to_string(&path)?.to_lowercase();
 	let mut rank = 0;
 	let mut preview_buf = Vec::new();
 
