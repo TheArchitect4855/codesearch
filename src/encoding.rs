@@ -1,3 +1,9 @@
+use std::ffi::{OsStr, OsString};
+
+const HEX_CHARS: [char; 16] = [
+	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+];
+
 pub fn is_printable(s: &[u8]) -> bool {
 	s.iter()
 		.all(|b| (*b > 0x08 && *b < 0x0e) || (*b >= 0x20 && *b < 0x7f))
@@ -22,4 +28,57 @@ pub fn is_utf8(s: &[u8]) -> bool {
 			|| (b & 0xf0 == 0xe0)
 			|| (b & 0xf8 == 0xf0)
 	})
+}
+
+pub fn to_hex(s: &[u8]) -> String {
+	let mut buf = String::with_capacity(s.len() * 2);
+	for b in s {
+		let hi = (*b & 0xf0) >> 4;
+		let lo = *b & 0x0f;
+		buf.push(HEX_CHARS[hi as usize]);
+		buf.push(HEX_CHARS[lo as usize]);
+	}
+
+	buf
+}
+
+#[cfg(target_family = "unix")]
+pub fn os_str_to_bytes(s: &OsStr) -> &[u8] {
+	use std::os::unix::ffi::OsStrExt;
+	s.as_bytes()
+}
+
+#[cfg(target_family = "windows")]
+pub fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
+	use std::os::windows::ffi::OsStrExt;
+	let mut res = Vec::with_capacity(s.len());
+	s.encode_wide().for_each(|v| {
+		let bytes = v.to_be_bytes();
+		res.extend_from_slice(&bytes);
+	});
+
+	res
+}
+
+#[cfg(target_family = "unix")]
+pub fn bytes_to_os_string(b: Vec<u8>) -> OsString {
+	use std::os::unix::ffi::OsStringExt;
+	OsString::from_vec(b)
+}
+
+#[cfg(target_family = "windows")]
+pub fn bytes_to_os_string(b: Vec<u8>) -> OsString {
+	use std::os::windows::ffi::OsStringExt;
+	if b.len() % 2 != 0 {
+		panic!("invalid number of bytes for a UTF-16 string");
+	}
+
+	let wide = Vec::with_capacity(b.len() / 2);
+	let mut buf = [0; 2];
+	for i in (0..b.len()).step(2) {
+		buf.copy_from_slice(&b[i..i + 2]);
+		wide.push(u16::from_be_bytes(buf));
+	}
+
+	OsString::from_wide(wide)
 }

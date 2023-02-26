@@ -1,7 +1,7 @@
 use indicatif::ProgressBar;
 use std::collections::HashMap;
 use std::error::Error;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -211,7 +211,7 @@ impl Index {
 			self.source.read_until(0, &mut buf)?;
 			buf.pop();
 
-			let doc = PathBuf::from(bytes_to_os_string(buf.clone()));
+			let doc = PathBuf::from(encoding::bytes_to_os_string(buf.clone()));
 			if !files.iter().any(|(path, _)| path == &doc) {
 				// Filter out files if they no longer exist on disk
 				continue;
@@ -294,7 +294,7 @@ impl Index {
 		}
 
 		buf.pop();
-		let document = bytes_to_os_string(buf);
+		let document = encoding::bytes_to_os_string(buf);
 		Ok(Some(document))
 	}
 
@@ -413,7 +413,7 @@ fn write_index<T: Write>(
 
 	// Write documents
 	for doc in documents {
-		out.write_all(os_str_to_bytes(&doc))?;
+		out.write_all(encoding::os_str_to_bytes(&doc))?;
 		out.write_all(&[0])?;
 		progress.inc(1);
 	}
@@ -422,46 +422,3 @@ fn write_index<T: Write>(
 
 	Ok(())
 }
-
-#[cfg(target_family = "unix")]
-fn os_str_to_bytes(s: &OsStr) -> &[u8] {
-	use std::os::unix::ffi::OsStrExt;
-	s.as_bytes()
-}
-
-#[cfg(target_family = "windows")]
-fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
-	use std::os::windows::ffi::OsStrExt;
-	let mut res = Vec::with_capacity(s.len());
-	s.encode_wide().for_each(|v| {
-		let bytes = v.to_be_bytes();
-		res.extend_from_slice(&bytes);
-	});
-
-	res
-}
-
-#[cfg(target_family = "unix")]
-fn bytes_to_os_string(b: Vec<u8>) -> OsString {
-	use std::os::unix::ffi::OsStringExt;
-	OsString::from_vec(b)
-}
-
-#[cfg(target_family = "windows")]
-fn bytes_to_os_string(b: Vec<u8>) -> OsString {
-	use std::os::windows::ffi::OsStringExt;
-	if b.len() % 2 != 0 {
-		panic!("invalid number of bytes for a UTF-16 string");
-	}
-
-	let wide = Vec::with_capacity(b.len() / 2);
-	let mut buf = [0; 2];
-	for i in (0..b.len()).step(2) {
-		buf.copy_from_slice(&b[i..i + 2]);
-		wide.push(u16::from_be_bytes(buf));
-	}
-
-	OsString::from_wide(wide)
-}
-
-// This is a change! HELLO WORLD

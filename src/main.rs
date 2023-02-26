@@ -2,10 +2,11 @@ use crate::index::Index;
 use bitmap::BitMap;
 use console::style;
 use search_rank::rank_file;
-use std::env;
 use std::error::Error;
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process;
+use std::{env, fs};
 
 mod bitmap;
 mod encoding;
@@ -20,14 +21,22 @@ fn main() {
 		show_help(name.as_deref());
 	}
 
-	let mut index = match Index::load("index.dat")
+	let save_path = match get_save_path() {
+		Ok(v) => v,
+		Err(e) => {
+			eprintln!("Failed to get save location: {e}");
+			process::exit(1);
+		}
+	};
+
+	let mut index = match Index::load(&save_path)
 		.and_then(|mut i| {
 			i.update()?;
 			Ok(i)
 		})
 		.or_else(|e| {
 			eprintln!("Failed to read index: {e}");
-			Index::create("index.dat")
+			Index::create(&save_path)
 		}) {
 		Ok(i) => i,
 		Err(e) => {
@@ -52,6 +61,23 @@ fn main() {
 				.into_iter()
 				.for_each(|(line, prev)| println!("{}\t{prev}", style(line).bold()));
 		});
+}
+
+fn get_save_path() -> Result<PathBuf, String> {
+	let mut path = home::home_dir().ok_or(String::from("Could not get home dir"))?;
+	path.push(".thearchitect");
+	path.push("codesearch");
+	if !path.exists() {
+		fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+	}
+
+	let cwd = env::current_dir().map_err(|e| e.to_string())?;
+	let cwd = encoding::os_str_to_bytes(cwd.as_os_str());
+	let hash = hmac_sha256::Hash::hash(cwd);
+	let file_name = encoding::to_hex(&hash);
+	path.push(file_name);
+
+	Ok(path)
 }
 
 fn get_trigrams(bytes: &[u8], buf: &mut Vec<[u8; 3]>) {
