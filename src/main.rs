@@ -111,7 +111,7 @@ fn search(
 		.iter()
 		.for_each(|t| get_trigrams(t.as_bytes(), &mut trigrams));
 
-	let mut any = BitMap::new(index.bitmask_len() as usize);
+	let mut any = BitMap::new(index.bitmap_len() as usize);
 	for t in &trigrams {
 		if let Some(v) = index.find_trigram(*t)? {
 			any |= &v;

@@ -13,6 +13,7 @@ use crate::encoding;
 
 const HEADER_LEN: u64 = 12;
 
+/// Represents a search index.
 pub struct Index {
 	document_count: u32,
 	modified: SystemTime,
@@ -20,6 +21,7 @@ pub struct Index {
 	source: BufReader<File>,
 }
 
+/// Represents an indexing error.
 #[derive(Debug)]
 pub enum IndexError {
 	BinaryFile,
@@ -65,10 +67,13 @@ impl From<std::string::FromUtf8Error> for IndexError {
 }
 
 impl Index {
-	pub fn bitmask_len(&self) -> u64 {
+	/// Returns the length in bytes of a bitmap
+	/// stored in this index.
+	pub fn bitmap_len(&self) -> u64 {
 		(self.document_count as f64 / 8.0).ceil() as u64
 	}
 
+	/// Creates a new index and writes the contents to the file at `path`.
 	pub fn create<P: AsRef<Path>>(path: P) -> Result<Self, IndexError> {
 		// Create a list of files to index
 		let mut files = Vec::new();
@@ -139,6 +144,7 @@ impl Index {
 		Self::load(path)
 	}
 
+	/// Loads an index from the file at `path`.
 	pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, IndexError> {
 		let file = File::open(path)?;
 		let metadata = file.metadata()?;
@@ -169,6 +175,7 @@ impl Index {
 		})
 	}
 
+	/// Indexes any new or changed files, and removes any indexed but deleted files.
 	pub fn update(&mut self) -> Result<(), IndexError> {
 		// Get list of files
 		let mut files = Vec::with_capacity(self.document_count as usize);
@@ -192,10 +199,9 @@ impl Index {
 		let seek_start = HEADER_LEN;
 		self.source.seek(SeekFrom::Start(seek_start))?;
 
-		let bitmap_len = (self.document_count as f64 / 8.0).ceil() as u64;
 		let mut index = Vec::with_capacity(self.ngram_count as usize);
 		let mut trigram_buf = [0; 3];
-		let mut bitmap_buf = vec![0; bitmap_len as usize];
+		let mut bitmap_buf = vec![0; self.bitmap_len() as usize];
 		for _ in 0..self.ngram_count {
 			self.source.read_exact(&mut trigram_buf)?;
 			self.source.read_exact(&mut bitmap_buf)?;
@@ -276,8 +282,9 @@ impl Index {
 		Ok(())
 	}
 
+	/// Finds the document with the given index.
 	pub fn find_document(&mut self, document: u32) -> Result<Option<OsString>, IndexError> {
-		let seek_start = HEADER_LEN + (self.bitmask_len() + 3) * self.ngram_count as u64;
+		let seek_start = HEADER_LEN + (self.bitmap_len() + 3) * self.ngram_count as u64;
 		self.source.seek(SeekFrom::Start(seek_start))?;
 		let mut buf = Vec::with_capacity(1024);
 		for _ in 0..document {
@@ -298,8 +305,9 @@ impl Index {
 		Ok(Some(document))
 	}
 
+	/// Finds the given trigram and returns its bitmap.
 	pub fn find_trigram(&mut self, trigram: [u8; 3]) -> Result<Option<BitMap>, IndexError> {
-		let skip = self.bitmask_len() + 3;
+		let skip = self.bitmap_len() + 3;
 		let seek_start = HEADER_LEN;
 
 		// Binary search for the right trigram
@@ -307,7 +315,7 @@ impl Index {
 		let mut rec_end = self.ngram_count;
 		let mut rec = self.ngram_count / 2 + 1;
 		let mut buf = [0; 3];
-		let mut bitmap_buf = vec![0; self.bitmask_len() as usize];
+		let mut bitmap_buf = vec![0; self.bitmap_len() as usize];
 		while rec > rec_start && rec < rec_end {
 			self.source
 				.seek(SeekFrom::Start(rec as u64 * skip + seek_start))?;
@@ -320,7 +328,6 @@ impl Index {
 				}
 				std::cmp::Ordering::Equal => {
 					self.source.read_exact(&mut bitmap_buf)?;
-
 					return Ok(Some(bitmap_buf.into()));
 				}
 				std::cmp::Ordering::Greater => {
@@ -334,6 +341,7 @@ impl Index {
 	}
 }
 
+/// Reads the file at `path` and collects all of its trigrams.
 fn index_file(path: &Path) -> Result<Vec<[u8; 3]>, IndexError> {
 	let file = File::open(path)?;
 	let mut reader = BufReader::new(file);
@@ -368,6 +376,7 @@ fn index_file(path: &Path) -> Result<Vec<[u8; 3]>, IndexError> {
 	Ok(trigrams)
 }
 
+/// Writes an index out to a stream.
 fn write_index<T: Write>(
 	mut out: T,
 	documents: Vec<OsString>,

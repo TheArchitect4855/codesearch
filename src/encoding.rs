@@ -4,6 +4,10 @@ const HEX_CHARS: [char; 16] = [
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
 ];
 
+/// Returns `true` if and only if the bytes in `s` are between the ranges
+/// `0x09` (ASCII HT, Horizontal Tab) to `0x0d` (ASCII CR, Carriage Return)
+/// and `0x20` (ASCII Space) to `0x7e` (ASCII ~, Tilde).
+/// These are both printable ranges.
 pub fn is_printable(s: &[u8]) -> bool {
 	s.iter()
 		.all(|b| (*b > 0x08 && *b < 0x0e) || (*b >= 0x20 && *b < 0x7f))
@@ -30,6 +34,7 @@ pub fn is_utf8(s: &[u8]) -> bool {
 	})
 }
 
+/// Converts `s` into a hexadecimal string.
 pub fn to_hex(s: &[u8]) -> String {
 	let mut buf = String::with_capacity(s.len() * 2);
 	for b in s {
@@ -42,12 +47,14 @@ pub fn to_hex(s: &[u8]) -> String {
 	buf
 }
 
+/// Converts an OS string to a byte array.
 #[cfg(target_family = "unix")]
 pub fn os_str_to_bytes(s: &OsStr) -> &[u8] {
 	use std::os::unix::ffi::OsStrExt;
 	s.as_bytes()
 }
 
+/// Converts an OS string to a byte array.
 #[cfg(target_family = "windows")]
 pub fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
 	use std::os::windows::ffi::OsStrExt;
@@ -60,12 +67,14 @@ pub fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
 	res
 }
 
+/// Converts a vec of bytes to an OsString.
 #[cfg(target_family = "unix")]
 pub fn bytes_to_os_string(b: Vec<u8>) -> OsString {
 	use std::os::unix::ffi::OsStringExt;
 	OsString::from_vec(b)
 }
 
+/// Converts a vec of bytes to an OsString.
 #[cfg(target_family = "windows")]
 pub fn bytes_to_os_string(b: Vec<u8>) -> OsString {
 	use std::os::windows::ffi::OsStringExt;

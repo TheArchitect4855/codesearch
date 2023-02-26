@@ -6,24 +6,36 @@ use std::{
 	},
 };
 
+/// A variable-length bitmap.
+/// Allows various operations such as bitwise AND, OR, XOR, shifts, etc.
 #[derive(Clone, Debug)]
 pub struct BitMap(Vec<u8>);
 
+/// An iterator over a bitmap.
 pub struct BitMapIterator {
 	pos: usize,
 	vec: Vec<u8>,
 }
 
 impl BitMap {
+	/// Create a new bitmap with the specified length, in bits.
+	/// # Arguments
+	/// `len`: The length of the bitmap in bits.
+	/// # Returns
+	/// A new bitmap, with all bits initialized to `0`/`false`.
 	pub fn new(len: usize) -> Self {
 		let bytes = (len as f64 / 8.0).ceil() as usize;
 		Self(vec![0; bytes])
 	}
 
+	/// Returns this bitmap as a byte slice.
 	pub fn as_bytes(&self) -> &[u8] {
 		return &self.0;
 	}
 
+	/// Gets the value at the specified bit.
+	/// Panics if `i` is less than `0` or greater than
+	/// the bitmap's length.
 	pub fn get(&self, i: usize) -> bool {
 		let byte = i / 8;
 		let bit = i % 8;
@@ -31,6 +43,12 @@ impl BitMap {
 		self.0[byte] & mask != 0
 	}
 
+	/// Sets the specified bit to the given value.
+	/// # Arguments
+	/// `i`: The bit index to set.
+	/// `v`: The value to set the bit to.
+	/// Panics if `i` is less than `0` or greater than
+	/// the bitmap's length.
 	pub fn set(&mut self, i: usize, v: bool) {
 		let byte = i / 8;
 		let bit = i % 8;
