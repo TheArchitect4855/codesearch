@@ -73,7 +73,7 @@ fn get_save_path() -> Result<PathBuf, String> {
 
 	let cwd = env::current_dir().map_err(|e| e.to_string())?;
 	let cwd = encoding::os_str_to_bytes(cwd.as_os_str());
-	let hash = hmac_sha256::Hash::hash(cwd);
+	let hash = hmac_sha256::Hash::hash(&cwd);
 	let file_name = encoding::to_hex(&hash);
 	path.push(file_name);
 

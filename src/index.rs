@@ -422,7 +422,7 @@ fn write_index<T: Write>(
 
 	// Write documents
 	for doc in documents {
-		out.write_all(encoding::os_str_to_bytes(&doc))?;
+		out.write_all(&encoding::os_str_to_bytes(&doc))?;
 		out.write_all(&[0])?;
 		progress.inc(1);
 	}

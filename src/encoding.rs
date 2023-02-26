@@ -49,14 +49,14 @@ pub fn to_hex(s: &[u8]) -> String {
 
 /// Converts an OS string to a byte array.
 #[cfg(target_family = "unix")]
-pub fn os_str_to_bytes(s: &OsStr) -> &[u8] {
+pub fn os_str_to_bytes(s: &OsStr) -> Box<[u8]> {
 	use std::os::unix::ffi::OsStrExt;
-	s.as_bytes()
+	s.as_bytes().into()
 }
 
 /// Converts an OS string to a byte array.
 #[cfg(target_family = "windows")]
-pub fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
+pub fn os_str_to_bytes(s: &OsStr) -> Box<[u8]> {
 	use std::os::windows::ffi::OsStrExt;
 	let mut res = Vec::with_capacity(s.len());
 	s.encode_wide().for_each(|v| {
@@ -64,7 +64,7 @@ pub fn os_str_to_bytes(s: &OsStr) -> Vec<u8> {
 		res.extend_from_slice(&bytes);
 	});
 
-	res
+	res.into_boxed_slice()
 }
 
 /// Converts a vec of bytes to an OsString.
@@ -82,12 +82,12 @@ pub fn bytes_to_os_string(b: Vec<u8>) -> OsString {
 		panic!("invalid number of bytes for a UTF-16 string");
 	}
 
-	let wide = Vec::with_capacity(b.len() / 2);
+	let mut wide = Vec::with_capacity(b.len() / 2);
 	let mut buf = [0; 2];
-	for i in (0..b.len()).step(2) {
+	for i in (0..b.len()).step_by(2) {
 		buf.copy_from_slice(&b[i..i + 2]);
 		wide.push(u16::from_be_bytes(buf));
 	}
 
-	OsString::from_wide(wide)
+	OsString::from_wide(&wide)
 }
