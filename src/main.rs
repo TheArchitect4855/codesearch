@@ -63,18 +63,28 @@ fn main() {
 		});
 }
 
-fn get_save_path() -> Result<PathBuf, String> {
-	let mut path = home::home_dir().ok_or(String::from("Could not get home dir"))?;
-	path.push(".thearchitect");
-	path.push("codesearch");
-	if !path.exists() {
-		fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-	}
-
-	let cwd = env::current_dir().map_err(|e| e.to_string())?;
+fn get_file_name() -> Result<String, std::io::Error> {
+	let cwd = env::current_dir()?;
 	let cwd = encoding::os_str_to_bytes(cwd.as_os_str());
 	let hash = hmac_sha256::Hash::hash(&cwd);
-	let file_name = encoding::to_hex(&hash);
+	Ok(encoding::to_hex(&hash))
+}
+
+fn get_save_path() -> Result<PathBuf, String> {
+	#[cfg(target_family = "unix")]
+	let env_name = "HOME";
+
+	#[cfg(target_family = "windows")]
+	let env_name = "LOCALAPPDATA";
+
+	let appdata = env::var_os(env_name).ok_or(String::from("Could not get app data dir"))?;
+	let mut path = PathBuf::from(appdata);
+	path.push(".codesearch");
+	if !path.exists() {
+		fs::create_dir(&path).map_err(|e| e.to_string())?;
+	}
+
+	let file_name = get_file_name().map_err(|e| e.to_string())?;
 	path.push(file_name);
 
 	Ok(path)

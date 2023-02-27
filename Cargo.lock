@@ -33,7 +33,6 @@ version = "0.1.0"
 dependencies = [
  "console",
  "hmac-sha256",
- "home",
  "ignore",
  "indicatif",
 ]
@@ -81,15 +80,6 @@ name = "hmac-sha256"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc736091aacb31ddaa4cd5f6988b3c21e99913ac846b41f32538c5fae5d71bfe"
-
-[[package]]
-name = "home"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "747309b4b440c06d57b0b25f2aee03ee9b5e5397d288c60e21fc709bb98a7408"
-dependencies = [
- "winapi",
-]
 
 [[package]]
 name = "ignore"
