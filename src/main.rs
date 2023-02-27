@@ -126,7 +126,7 @@ fn search(
 
 		let doc = index
 			.find_document(doc as u32)?
-			.expect("find_trigram return invalid document index");
+			.expect("find_trigram returned invalid document index");
 
 		let mut preview_buf = Vec::new();
 		let rank = rank_file(&doc, &terms, &trigrams, &mut preview_buf)?;

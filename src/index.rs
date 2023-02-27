@@ -4,7 +4,7 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::Display;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -211,13 +211,14 @@ impl Index {
 		}
 
 		let mut documents = HashMap::with_capacity(self.document_count as usize);
-		let mut buf = Vec::with_capacity(1024);
+		let mut len_buf = [0; 4];
 		for i in 0..self.document_count as usize {
-			buf.clear();
-			self.source.read_until(0, &mut buf)?;
-			buf.pop();
+			self.source.read_exact(&mut len_buf)?;
+			let len = u32::from_be_bytes(len_buf);
+			let mut buf = vec![0; len as usize];
+			self.source.read_exact(&mut buf)?;
 
-			let doc = PathBuf::from(encoding::bytes_to_os_string(buf.clone()));
+			let doc = PathBuf::from(encoding::bytes_to_os_string(buf));
 			if !files.iter().any(|(path, _)| path == &doc) {
 				// Filter out files if they no longer exist on disk
 				continue;
@@ -286,21 +287,18 @@ impl Index {
 	pub fn find_document(&mut self, document: u32) -> Result<Option<OsString>, IndexError> {
 		let seek_start = HEADER_LEN + (self.bitmap_len() + 3) * self.ngram_count as u64;
 		self.source.seek(SeekFrom::Start(seek_start))?;
-		let mut buf = Vec::with_capacity(1024);
+		let mut buf = [0; 4];
 		for _ in 0..document {
-			if self.source.read_until(0, &mut buf)? == 0 {
-				return Ok(None);
-			}
-
-			buf.clear();
+			self.source.read_exact(&mut buf)?;
+			let len = u32::from_be_bytes(buf) as i64;
+			self.source.seek_relative(len)?;
 		}
 
-		let len = self.source.read_until(0, &mut buf)?;
-		if len == 0 {
-			return Ok(None);
-		}
+		self.source.read_exact(&mut buf)?;
+		let len = u32::from_be_bytes(buf) as usize;
+		let mut buf = vec![0; len];
+		self.source.read_exact(&mut buf)?;
 
-		buf.pop();
 		let document = encoding::bytes_to_os_string(buf);
 		Ok(Some(document))
 	}
@@ -422,8 +420,10 @@ fn write_index<T: Write>(
 
 	// Write documents
 	for doc in documents {
-		out.write_all(&encoding::os_str_to_bytes(&doc))?;
-		out.write_all(&[0])?;
+		let doc = encoding::os_str_to_bytes(&doc);
+		let len = (doc.len() as u32).to_be_bytes();
+		out.write_all(&len)?;
+		out.write_all(&doc)?;
 		progress.inc(1);
 	}
 
